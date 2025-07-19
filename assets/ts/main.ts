@@ -32,6 +32,7 @@ class Canvas3D extends LayerCanvasBase {
 	m_pitch: number = 0;
 	m_roll: number = 0;
 	m_scale: number = 1;
+	m_gridScale: number = 1;
 
 	constructor() {
 		super();
@@ -55,12 +56,60 @@ class Canvas3D extends LayerCanvasBase {
 		);
 	}
 
-	project(vec: Vec3): Vec2 {
-		const scale = 300 * this.m_scale / (vec.z + 5); // 简单透视
+	project(vec: Vec3, scale: number): Vec2 {
+		const kScale = 300 * scale / (vec.z + 6); // 简单透视
 		return new Vec2(
-			this.m_canvas.width / 2 + vec.x * scale,
-			this.m_canvas.height / 2 - vec.y * scale
+			this.m_canvas.width / 2 + vec.x * kScale,
+			this.m_canvas.height / 2 - vec.y * kScale
 		);
+	}
+
+	draw16Grid() {
+		if (!this.m_context) {
+			return;
+		}
+
+		const planeZ = -1.45;
+		const planeVertices = [
+			new Vec3(-1, -1, planeZ),
+			// new Vec3(-1, 1, planeZ),
+			new Vec3(1, 1, planeZ),
+			// new Vec3(1, -1, planeZ),
+		];
+		const projectedPlane = planeVertices.map(v => this.project(v, this.m_gridScale * this.m_scale));
+
+		const topleftCorner = new Vec2(9999999, 9999999);
+		const rightBottomCorner = new Vec2();
+		projectedPlane.forEach(vec => {
+			topleftCorner.x = Math.min(topleftCorner.x, vec.x);
+			topleftCorner.y = Math.min(topleftCorner.y, vec.y);
+			rightBottomCorner.x = Math.max(rightBottomCorner.x, vec.x);
+			rightBottomCorner.y = Math.max(rightBottomCorner.y, vec.y);
+		});
+
+		this.m_context.beginPath();
+		this.m_context.moveTo(topleftCorner.x, topleftCorner.y);
+		this.m_context.lineTo(rightBottomCorner.x, topleftCorner.y);
+		this.m_context.lineTo(rightBottomCorner.x, rightBottomCorner.y);
+		this.m_context.lineTo(topleftCorner.x, rightBottomCorner.y);
+		this.m_context.lineTo(topleftCorner.x, topleftCorner.y);
+		
+		const gridCount = 4;
+		const splitY = (rightBottomCorner.y - topleftCorner.y) / gridCount;
+		const splitX = (rightBottomCorner.x - topleftCorner.x) / gridCount;
+		for (var i = 0; i < gridCount; i++) {
+			var y = topleftCorner.y + splitY * i;
+			this.m_context.moveTo(topleftCorner.x, y);
+			this.m_context.lineTo(rightBottomCorner.x, y);
+		}
+		for (var i = 0; i < gridCount; i++) {
+			var x = topleftCorner.x + splitX * i;
+			this.m_context.moveTo(x, topleftCorner.y);
+			this.m_context.lineTo(x, rightBottomCorner.y);
+		}
+		this.m_context.closePath();
+		this.m_context.strokeStyle = 'rgba(33, 200, 33, 0.5)';
+		this.m_context.stroke();
 	}
 
 	Redraw() {
@@ -68,19 +117,23 @@ class Canvas3D extends LayerCanvasBase {
 			console.warn("Context not initialized");
 			return;
 		}
-
 		this.m_context.clearRect(0, 0, this.m_canvas.width, this.m_canvas.height);
+
+		this.draw16Grid();
+
 		const rorationMatrix = CalcRotationMatrix(this.m_yaw, this.m_pitch, this.m_roll);
 		const rorated = DefaultCubeVertices.map(v => rorationMatrix.MultiplyByVec3(v));
-		const projected = rorated.map(v => this.project(v));
+		const projected = rorated.map(v => this.project(v, this.m_scale));
 
 		this.m_context.beginPath();
 		for (const [a, b] of DefaultCubeEdges) {
 			this.m_context.moveTo(projected[a].x, projected[a].y);
 			this.m_context.lineTo(projected[b].x, projected[b].y);
 		}
+		this.m_context.closePath();
 		this.m_context.strokeStyle = 'black';
 		this.m_context.stroke();
+
 	}
 
 	OnResize(width: number, height: number): void {
@@ -106,6 +159,11 @@ class Canvas3D extends LayerCanvasBase {
 
 	SetScale(scale: number) {
 		this.m_scale = scale;
+		this.Redraw();
+	}
+
+	SetGridScale(scale: number) {
+		this.m_gridScale = scale;
 		this.Redraw();
 	}
 }
@@ -266,6 +324,7 @@ document.getElementById('yaw')?.addEventListener("input", (e) => layer3D.SetYaw(
 document.getElementById('pitch')?.addEventListener("input", (e) => layer3D.SetPitch(DegToRad(parseFloat((e.target as HTMLInputElement).value))));
 document.getElementById('roll')?.addEventListener("input", (e) => layer3D.SetRoll(DegToRad(parseFloat((e.target as HTMLInputElement).value))));
 document.getElementById('zSlider')?.addEventListener("input", (e) => layer3D.SetScale(parseFloat((e.target as HTMLInputElement).value)));
+document.getElementById('gridScale')?.addEventListener("input", (e) => layer3D.SetGridScale(parseFloat((e.target as HTMLInputElement).value)));
 
 const layerDraw = new CanvasDraw();
 app.AddLayer(layerDraw);

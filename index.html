@@ -40,11 +40,11 @@
 
 <body>
 	<div id="toolbar">
-		<label>Yaw <input id="yaw" type="range" min="-180" max="180" value="0" /></label>
-		<label>Pitch <input id="pitch" type="range" min="-180" max="180" value="0" /></label>
-		<label>Roll <input id="roll" type="range" min="-180" max="180" value="0" /></label>
-		<!-- <label>Perspective: <input type="range" id="perspectiveSlider" min="0" max="2" step="0.01" value="0.5" /></label> -->
-		<label>Z: <input type="range" id="zSlider" min="0.1" max="10" step="0.01" value="1" /></label>
+		<label>Yaw <input id="yaw" type="range" min="-180" max="180" value="0" step="0.01" /></label>
+		<label>Pitch <input id="pitch" type="range" min="-180" max="180" value="0" step="0.01" /></label>
+		<label>Roll <input id="roll" type="range" min="-180" max="180" value="0" step="0.01" /></label>
+		<label>Scale: <input type="range" id="zSlider" min="0.1" max="10" step="0.01" value="1" /></label>
+		<label>Grid: <input type="range" id="gridScale" min="0.2" max="2" step="0.01" value="1" /></label>
 		<button id="clear">清除绘图</button>
 		<button id="undo">撤回</button>
 		<button id="redo">重做</button>
