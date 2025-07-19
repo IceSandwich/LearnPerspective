@@ -1,9 +1,129 @@
-﻿interface Vec3 { x: number, y: number, z: number }
-interface Vec2 { x: number, y: number }
+﻿//#region Data Types
+
+class Vec2 {
+	x: number;
+	y: number;
+	constructor(x: number = 0, y: number = 0) {
+		this.x = x;
+		this.y = y;
+	}
+}
+
+class Vec3 {
+	x: number;
+	y: number;
+	z: number;
+
+	constructor(x: number = 0, y: number = 0, z: number = 0) {
+		this.x = x;
+		this.y = y;
+		this.z = z;
+	}
+
+	// 将 Vec3 转为 Vec4 齐次坐标（w=1）
+	public ToHomogeneous(): Vec4 {
+		return new Vec4(this.x, this.y, this.z, 1);
+	}
+}
+
+class Vec4 {
+	x: number;
+	y: number;
+	z: number;
+	w: number;
+
+	constructor(x: number = 0, y: number = 0, z: number = 0, w: number = 1) {
+		this.x = x;
+		this.y = y;
+		this.z = z;
+		this.w = w;
+	}
+
+	// 从 Vec4 齐次坐标还原 Vec3（将 w ≠ 1 情况归一化）
+	public ToVec3(): Vec3 {
+		if (this.w === 0) throw new Error("Cannot convert from homogeneous coordinates with w = 0");
+		return new Vec3(this.x / this.w, this.y / this.w, this.z / this.w);
+	}
+}
+
+class Matrix3 {
+	// 按行主序存储 3x3 矩阵
+	m_elements: number[];
+
+	constructor(elements?: number[]) {
+		this.m_elements = elements ?? [
+			1, 0, 0,
+			0, 1, 0,
+			0, 0, 1,
+		];
+	}
+
+	public MultiplyByVec3(vec: Vec3): Vec3 {
+		const e = this.m_elements;
+		const x = e[0] * vec.x + e[1] * vec.y + e[2] * vec.z;
+		const y = e[3] * vec.x + e[4] * vec.y + e[5] * vec.z;
+		const z = e[6] * vec.x + e[7] * vec.y + e[8] * vec.z;
+
+		return new Vec3(x, y, z);
+	}
+}
+
+class Matrix4 {
+	// 按行主序存储 4x4 矩阵
+	m_elements: number[];
+
+	constructor(elements?: number[]) {
+		this.m_elements = elements ?? [
+			1, 0, 0, 0,
+			0, 1, 0, 0,
+			0, 0, 1, 0,
+			0, 0, 0, 1,
+		];
+	}
+
+	MultiplyByVec4(vec: Vec4): Vec4 {
+		const e = this.m_elements;
+		const x = e[0] * vec.x + e[1] * vec.y + e[2] * vec.z + e[3] * vec.w;
+		const y = e[4] * vec.x + e[5] * vec.y + e[6] * vec.z + e[7] * vec.w;
+		const z = e[8] * vec.x + e[9] * vec.y + e[10] * vec.z + e[11] * vec.w;
+		const w = e[12] * vec.x + e[13] * vec.y + e[14] * vec.z + e[15] * vec.w;
+
+		return new Vec4(x, y, z, w);
+	}
+
+	/**
+	 * 应用透视投影矩阵到给定的 Vec3 点。
+	 * @param vec 要投影的 Vec3 点。
+	 * @returns 投影到标准化设备坐标 (NDC) 空间后的 Vec3 点。
+	 * NDC 坐标的 x 和 y 通常在 [-1, 1] 范围内，z 也在 [-1, 1] 范围内。
+	 */
+	ProjectVec3(vec: Vec3): Vec3 {
+		// 1. 将 Vec3 转换为齐次坐标 (Vec4)
+		const homogeneousPoint = vec.ToHomogeneous();
+
+		// 2. 将投影矩阵应用于齐次坐标
+		const transformedHomogeneousPoint = this.MultiplyByVec4(homogeneousPoint);
+
+		// 3. 执行透视除法，将齐次坐标转换回 Vec3 (NDC 空间)
+		const projectedVec3 = transformedHomogeneousPoint.ToVec3();
+
+		return projectedVec3;
+	}
+}
+
+//#endregion
+
+//#region Primitives
 
 const DefaultCubeVertices: Vec3[] = [
-	{ x: -1, y: -1, z: -1 }, { x: 1, y: -1, z: -1 }, { x: 1, y: 1, z: -1 }, { x: -1, y: 1, z: -1 },
-	{ x: -1, y: -1, z: 1 }, { x: 1, y: -1, z: 1 }, { x: 1, y: 1, z: 1 }, { x: -1, y: 1, z: 1 }
+	new Vec3(-1, -1, -1),
+	new Vec3(1, -1, -1),
+	new Vec3(1, 1, -1),
+	new Vec3(-1, 1, -1),
+	new Vec3(-1, -1, 1),
+	new Vec3(1, -1, 1),
+	new Vec3(1, 1, 1),
+	new Vec3(-1, 1, 1),
 ];
 
 const DefaultCubeEdges: [number, number][] = [
@@ -12,166 +132,88 @@ const DefaultCubeEdges: [number, number][] = [
 	[0, 4], [1, 5], [2, 6], [3, 7]
 ];
 
+//#endregion
+
+
 /**
  * 生成一个透视投影矩阵。
- *
  * @param fovY 垂直视场角（以弧度为单位）。
  * @param aspectRatio 视口的宽高比（宽度 / 高度）。
  * @param near 最近的裁剪面距离。
  * @param far 最远的裁剪面距离。
- * @returns 16 元素的 Float32Array，表示 4x4 透视投影矩阵。
+ * @returns 4x4 透视投影矩阵。
  */
 function CreatePerspectiveProjectionMatrix(
 	fovY: number,
 	aspectRatio: number,
 	near: number,
 	far: number
-): Float32Array {
-	const matrix = new Float32Array(16);
+): Matrix4 {
+	const ret = new Matrix4();
 
 	const f = 1.0 / Math.tan(fovY / 2);
 	const rangeInv = 1.0 / (near - far);
 
 	// 第一列
-	matrix[0] = f / aspectRatio;
-	matrix[1] = 0;
-	matrix[2] = 0;
-	matrix[3] = 0;
+	ret.m_elements[0] = f / aspectRatio;
+	ret.m_elements[1] = 0;
+	ret.m_elements[2] = 0;
+	ret.m_elements[3] = 0;
 
 	// 第二列
-	matrix[4] = 0;
-	matrix[5] = f;
-	matrix[6] = 0;
-	matrix[7] = 0;
+	ret.m_elements[4] = 0;
+	ret.m_elements[5] = f;
+	ret.m_elements[6] = 0;
+	ret.m_elements[7] = 0;
 
 	// 第三列
-	matrix[8] = 0;
-	matrix[9] = 0;
-	matrix[10] = (near + far) * rangeInv;
-	matrix[11] = -1; // 这一项通常是 -1 或 1，取决于惯例（OpenGL 或 DirectX）
+	ret.m_elements[8] = 0;
+	ret.m_elements[9] = 0;
+	ret.m_elements[10] = (near + far) * rangeInv;
+	ret.m_elements[11] = -1; // 这一项通常是 -1 或 1，取决于惯例（OpenGL 或 DirectX）
 
 	// 第四列
-	matrix[12] = 0;
-	matrix[13] = 0;
-	matrix[14] = near * far * rangeInv * 2; // 注意这里是 2 * near * far
-	matrix[15] = 0;
+	ret.m_elements[12] = 0;
+	ret.m_elements[13] = 0;
+	ret.m_elements[14] = near * far * rangeInv * 2; // 注意这里是 2 * near * far
+	ret.m_elements[15] = 0;
 
-	return matrix;
+	return ret;
 }
 
 /**
- * 将一个 Vec3 点转换为齐次坐标的 Vec4。
- * @param v 要转换的 Vec3。
- * @returns 齐次坐标的 Float32Array (x, y, z, 1)。
+ * 角度到弧度
+ * @param deg 角度
+ * @returns 弧度
  */
-function Vec3ToHomogeneous(v: Vec3): Float32Array {
-	return new Float32Array([v.x, v.y, v.z, 1.0]);
-}
-
-/**
- * 将一个齐次坐标的 Vec4 转换为 Vec3。
- * 执行透视除法。
- * @param v 齐次坐标的 Float32Array (x, y, z, w)。
- * @returns 转换后的 Vec3。
- */
-function HomogeneousToVec3(v: Float32Array): Vec3 {
-	const w = v[3];
-	if (w === 0) {
-		// 避免除以零，通常这意味着它是一个方向向量或在无限远处
-		// 或者在裁剪空间中被裁剪了
-		console.warn("Attempted to convert homogeneous point with w=0 to Vec3.");
-		return { x: v[0], y: v[1], z: v[2] }; // 或者抛出错误，取决于具体需求
-	}
-	return { x: v[0] / w, y: v[1] / w, z: v[2] / w };
-}
-
-/**
- * 将 4x4 矩阵应用于 4x1 齐次向量。
- * @param matrix 4x4 矩阵 (Float32Array, 16 元素，列优先)。
- * @param vector 4x1 齐次向量 (Float32Array, 4 元素)。
- * @returns 转换后的 4x1 齐次向量 (Float32Array)。
- */
-function MultiplyMatrix4ByVector4(
-	matrix: Float32Array,
-	vector: Float32Array
-): Float32Array {
-	const result = new Float32Array(4);
-
-	// 矩阵乘法
-	// result.x = m0*v0 + m4*v1 + m8*v2 + m12*v3
-	// result.y = m1*v0 + m5*v1 + m9*v2 + m13*v3
-	// result.z = m2*v0 + m6*v1 + m10*v2 + m14*v3
-	// result.w = m3*v0 + m7*v1 + m11*v2 + m15*v3
-
-	result[0] =
-		matrix[0] * vector[0] +
-		matrix[4] * vector[1] +
-		matrix[8] * vector[2] +
-		matrix[12] * vector[3];
-	result[1] =
-		matrix[1] * vector[0] +
-		matrix[5] * vector[1] +
-		matrix[9] * vector[2] +
-		matrix[13] * vector[3];
-	result[2] =
-		matrix[2] * vector[0] +
-		matrix[6] * vector[1] +
-		matrix[10] * vector[2] +
-		matrix[14] * vector[3];
-	result[3] =
-		matrix[3] * vector[0] +
-		matrix[7] * vector[1] +
-		matrix[11] * vector[2] +
-		matrix[15] * vector[3];
-
-	return result;
-}
-
-/**
- * 应用透视投影矩阵到给定的 Vec3 点。
- * @param point 要投影的 Vec3 点。
- * @param projectionMatrix 透视投影矩阵。
- * @returns 投影到标准化设备坐标 (NDC) 空间后的 Vec3 点。
- * NDC 坐标的 x 和 y 通常在 [-1, 1] 范围内，z 也在 [-1, 1] 范围内。
- */
-function ProjectPoint(point: Vec3, projectionMatrix: Float32Array): Vec3 {
-	// 1. 将 Vec3 转换为齐次坐标 (Vec4)
-	const homogeneousPoint = Vec3ToHomogeneous(point);
-
-	// 2. 将投影矩阵应用于齐次坐标
-	const transformedHomogeneousPoint = MultiplyMatrix4ByVector4(
-		projectionMatrix,
-		homogeneousPoint
-	);
-
-	// 3. 执行透视除法，将齐次坐标转换回 Vec3 (NDC 空间)
-	const projectedVec3 = HomogeneousToVec3(transformedHomogeneousPoint);
-
-	return projectedVec3;
-}
-
 function DegToRad(deg: number) {
 	return deg * Math.PI / 180;
 }
 
-function MultiplyMatrixAndPoint(m: number[][], p: Vec3): Vec3 {
-	const x = m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z;
-	const y = m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z;
-	const z = m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z;
-	return { x, y, z };
-}
+/**
+ * 根据欧拉角（Yaw-Pitch-Roll）计算3×3旋转矩阵。
+ * @param yaw Yaw（航向角，弧度）绕 Z 轴旋转
+ * @param pitch Pitch（俯仰角，弧度）绕 Y 轴旋转
+ * @param roll Roll（翻滚角，弧度）绕 X 轴旋转
+ * @returns 3x3旋转矩阵
+ */
+function CalcRotationMatrix(yaw: number, pitch: number, roll: number): Matrix3 {
+	const cy = Math.cos(yaw);
+	const sy = Math.sin(yaw);
+	const cp = Math.cos(pitch);
+	const sp = Math.sin(pitch);
+	const cr = Math.cos(roll);
+	const sr = Math.sin(roll);
 
-function GetRotationMatrix(yaw: number, pitch: number, roll: number): number[][] {
-	const cy = Math.cos(DegToRad(yaw));
-	const sy = Math.sin(DegToRad(yaw));
-	const cp = Math.cos(DegToRad(pitch));
-	const sp = Math.sin(DegToRad(pitch));
-	const cr = Math.cos(DegToRad(roll));
-	const sr = Math.sin(DegToRad(roll));
-
-	return [
-		[cy * cr + sy * sp * sr, sr * cp, -sy * cr + cy * sp * sr],
-		[-cy * sr + sy * sp * cr, cr * cp, sr * sy + cy * sp * cr],
-		[sy * cp, -sp, cy * cp]
-	];
+	return new Matrix3([
+		cy * cr + sy * sp * sr,
+		sr * cp,
+		-sy * cr + cy * sp * sr,
+		-cy * sr + sy * sp * cr,
+		cr * cp,
+		sr * sy + cy * sp * cr,
+		sy * cp,
+		-sp,
+		cy * cp,
+	]);
 }
