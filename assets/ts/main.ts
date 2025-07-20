@@ -33,6 +33,7 @@ class Canvas3D extends LayerCanvasBase {
 	m_roll: number = 0;
 	m_scale: number = 1;
 	m_gridScale: number = 1;
+	m_gridOffset: Vec2 = new Vec2();
 
 	constructor() {
 		super();
@@ -64,12 +65,25 @@ class Canvas3D extends LayerCanvasBase {
 		);
 	}
 
+	drawCenterDot() {
+		if (!this.m_context) {
+			return;
+		}
+
+		const projected = this.project(new Vec3(), this.m_scale);
+		this.m_context.beginPath();
+		this.m_context.ellipse(projected.x, projected.y, 10, 10, 0, DegToRad(0), DegToRad(360));
+		this.m_context.closePath();
+		this.m_context.strokeStyle = 'rgba(33, 33, 200, 0.8)';
+		this.m_context.stroke();
+	}
+
 	draw16Grid() {
 		if (!this.m_context) {
 			return;
 		}
 
-		const planeZ = -1.45;
+		const planeZ = -Math.sqrt(3);
 		const planeVertices = [
 			new Vec3(-1, -1, planeZ),
 			// new Vec3(-1, 1, planeZ),
@@ -78,8 +92,8 @@ class Canvas3D extends LayerCanvasBase {
 		];
 		const projectedPlane = planeVertices.map(v => this.project(v, this.m_gridScale * this.m_scale));
 
-		const topleftCorner = new Vec2(9999999, 9999999);
-		const rightBottomCorner = new Vec2();
+		let topleftCorner = new Vec2(9999999, 9999999);
+		let rightBottomCorner = new Vec2();
 		projectedPlane.forEach(vec => {
 			topleftCorner.x = Math.min(topleftCorner.x, vec.x);
 			topleftCorner.y = Math.min(topleftCorner.y, vec.y);
@@ -87,13 +101,16 @@ class Canvas3D extends LayerCanvasBase {
 			rightBottomCorner.y = Math.max(rightBottomCorner.y, vec.y);
 		});
 
+		topleftCorner = topleftCorner.Add(this.m_gridOffset);
+		rightBottomCorner = rightBottomCorner.Add(this.m_gridOffset);
+
 		this.m_context.beginPath();
 		this.m_context.moveTo(topleftCorner.x, topleftCorner.y);
 		this.m_context.lineTo(rightBottomCorner.x, topleftCorner.y);
 		this.m_context.lineTo(rightBottomCorner.x, rightBottomCorner.y);
 		this.m_context.lineTo(topleftCorner.x, rightBottomCorner.y);
 		this.m_context.lineTo(topleftCorner.x, topleftCorner.y);
-		
+
 		const gridCount = 4;
 		const splitY = (rightBottomCorner.y - topleftCorner.y) / gridCount;
 		const splitX = (rightBottomCorner.x - topleftCorner.x) / gridCount;
@@ -119,6 +136,7 @@ class Canvas3D extends LayerCanvasBase {
 		}
 		this.m_context.clearRect(0, 0, this.m_canvas.width, this.m_canvas.height);
 
+		this.drawCenterDot();
 		this.draw16Grid();
 
 		const rorationMatrix = CalcRotationMatrix(this.m_yaw, this.m_pitch, this.m_roll);
@@ -164,6 +182,16 @@ class Canvas3D extends LayerCanvasBase {
 
 	SetGridScale(scale: number) {
 		this.m_gridScale = scale;
+		this.Redraw();
+	}
+
+	SetGridOffsetX(val: number) {
+		this.m_gridOffset.x = val;
+		this.Redraw();
+	}
+
+	SetGridOffsetY(val: number) {
+		this.m_gridOffset.y = val;
 		this.Redraw();
 	}
 }
@@ -289,6 +317,87 @@ class Application {
 		this.m_layers = [];
 	}
 
+	InitGrid(angles: number[], func: (e: MouseEvent) => void) {
+		const table = document.getElementById('quicktable');
+		if (!table) return;
+		let cells: HTMLElement[][] = [];
+
+		const butEnter = function (e: MouseEvent) {
+			const row = parseInt((e.target as HTMLButtonElement).getAttribute('data-pitch-index')!);
+			const col = parseInt((e.target as HTMLButtonElement).getAttribute('data-yaw-index')!);
+
+			// 高亮整行
+			cells[row].forEach(cell => {
+				cell.classList.add('highlight-row');
+			});
+
+			// 高亮整列
+			cells.forEach(rowCells => {
+				rowCells[col].classList.add('highlight-col');
+			});
+		};
+
+		const butLeave = function (e: MouseEvent) {
+			const row = parseInt((e.target as HTMLButtonElement).getAttribute('data-pitch-index')!);
+			const col = parseInt((e.target as HTMLButtonElement).getAttribute('data-yaw-index')!);
+
+			// 移除行高亮
+			cells[row].forEach(cell => {
+				cell.classList.remove('highlight-row');
+			});
+
+			// 移除列高亮
+			cells.forEach(rowCells => {
+				rowCells[col].classList.remove('highlight-col');
+			});
+		}
+
+		// 生成表头
+		const headerRow = document.createElement('tr');
+		headerRow.appendChild(document.createElement('th')); // 左上角空单元格
+		angles.forEach(yaw => {
+			const th = document.createElement('th');
+			th.textContent = yaw.toString();
+			headerRow.appendChild(th);
+		});
+		table.appendChild(headerRow);
+
+		// 生成表格内容（每行表示一个 pitch）
+		angles.forEach((pitch, pitchIndex) => {
+			const row = document.createElement('tr');
+
+			// 行首：pitch 值
+			const pitchCell = document.createElement('th');
+			pitchCell.textContent = pitch.toString();
+			row.appendChild(pitchCell);
+
+			// 每列：按钮
+			angles.forEach((yaw, yawIndex) => {
+				const cell = document.createElement('td');
+				const button = document.createElement('button');
+				button.textContent = '#';
+				button.setAttribute('data-yaw', yaw.toString());
+				button.setAttribute('data-pitch', pitch.toString());
+				button.setAttribute('data-pitch-index', pitchIndex.toString());
+				button.setAttribute('data-yaw-index', yawIndex.toString());
+
+				// 存储按钮对应的单元格信息
+				if (!cells[pitchIndex]) cells[pitchIndex] = [];
+				cells[pitchIndex][yawIndex] = cell;
+
+				// 添加点击事件
+				button.addEventListener('click', func);
+				button.addEventListener('mouseenter', butEnter);
+				button.addEventListener('mouseleave', butLeave);
+
+				cell.appendChild(button);
+				row.appendChild(cell);
+			});
+
+			table.appendChild(row);
+		});
+	}
+
 	Init() {
 		this.registerEvents();
 		this.OnResize();
@@ -325,6 +434,8 @@ document.getElementById('pitch')?.addEventListener("input", (e) => layer3D.SetPi
 document.getElementById('roll')?.addEventListener("input", (e) => layer3D.SetRoll(DegToRad(parseFloat((e.target as HTMLInputElement).value))));
 document.getElementById('zSlider')?.addEventListener("input", (e) => layer3D.SetScale(parseFloat((e.target as HTMLInputElement).value)));
 document.getElementById('gridScale')?.addEventListener("input", (e) => layer3D.SetGridScale(parseFloat((e.target as HTMLInputElement).value)));
+document.getElementById('gridOffsetX')?.addEventListener("input", (e) => layer3D.SetGridOffsetX(parseFloat((e.target as HTMLInputElement).value)));
+document.getElementById('gridOffsetY')?.addEventListener("input", (e) => layer3D.SetGridOffsetY(parseFloat((e.target as HTMLInputElement).value)));
 
 const layerDraw = new CanvasDraw();
 app.AddLayer(layerDraw);
@@ -333,3 +444,39 @@ document.getElementById('redo')?.addEventListener("click", (e) => layerDraw.Redo
 document.getElementById('undo')?.addEventListener("click", (e) => layerDraw.Undo());
 
 app.Init();
+
+document.getElementById("quick")?.addEventListener("click", (e) => {
+	const menu = document.getElementById('menu');
+	const overlay = document.getElementById('overlay');
+	if (!menu || !overlay) return;
+
+	const isVisible = menu.style.display === 'block';
+	menu.style.display = isVisible ? 'none' : 'block';
+	overlay.style.display = isVisible ? 'none' : 'block';
+});
+
+document.getElementById("overlay")?.addEventListener("click", (e) => {
+	const menu = document.getElementById('menu');
+	const overlay = document.getElementById('overlay');
+	if (!menu || !overlay) return;
+
+	menu.style.display = 'none';
+	overlay.style.display = 'none';
+});
+
+app.InitGrid([-67.5, -45, -22.5, 0, 22.5, 45, 67.5], (e: MouseEvent) => {
+	const yaw = (e.target as HTMLButtonElement).getAttribute('data-yaw');
+	const pitch = (e.target as HTMLButtonElement).getAttribute('data-pitch');
+	if (yaw == null || pitch == null) return;
+
+	layer3D.SetYaw(DegToRad(parseFloat(yaw)));
+	layer3D.SetPitch(DegToRad(parseFloat(pitch)));
+	layer3D.SetRoll(0);
+
+	// won't trigger `input` event
+	(document.getElementById('yaw') as HTMLInputElement).value = yaw.toString();
+	(document.getElementById('pitch') as HTMLInputElement).value = pitch.toString();
+	(document.getElementById('roll') as HTMLInputElement).value = "0";
+
+	document.getElementById("overlay")?.click();
+});
