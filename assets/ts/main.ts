@@ -41,6 +41,17 @@ class Canvas3D extends LayerCanvasBase {
 		this.initPerspectiveMatrix();
 	}
 
+	Init(): void {
+		super.Init();
+
+		document.addEventListener('wheel', (e) => this.onWheel(e));
+	}
+
+	onWheel(e: WheelEvent) {
+		this.m_scale = Math.max(0.1, this.m_scale - e.deltaY * 0.003);
+		this.Redraw();
+	}
+
 	initPerspectiveMatrix() {
 		// 定义参数
 		const fieldOfView = (45 * Math.PI) / 180; // 45 度转换为弧度
@@ -217,19 +228,39 @@ class CanvasDraw extends LayerCanvasBase {
 		this.m_canvas.addEventListener('pointerdown', e => this.onMouseDown(e));
 		this.m_canvas.addEventListener('pointermove', e => this.onMouseMove(e));
 		this.m_canvas.addEventListener('pointerup', e => this.onMouseUp(e));
+		document.addEventListener('keydown', e => this.onDocumentKeyDown(e));
+	}
+
+	onDocumentKeyDown(e: KeyboardEvent) {
+		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') {
+			e.preventDefault();
+			
+			this.Redo();
+			return;
+		}
+		if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+			e.preventDefault();
+
+			this.Undo();
+			return;
+		}
 	}
 
 	onMouseDown(e: PointerEvent): void {
-		this.m_currentStroke = {
-			points: [],
-			color: 'red',
-			width: 2
-		};
-		this.m_undoneStrokes.length = 0;
-		const rect = this.m_canvas.getBoundingClientRect();
-		const x = (e.clientX - rect.left) / this.m_canvas.width;
-		const y = (e.clientY - rect.top) / this.m_canvas.height;
-		this.m_currentStroke.points.push({ x, y });
+		if (e.button === 0) {
+			e.preventDefault();
+
+			this.m_currentStroke = {
+				points: [],
+				color: 'red',
+				width: 2
+			};
+			this.m_undoneStrokes.length = 0;
+			const rect = this.m_canvas.getBoundingClientRect();
+			const x = (e.clientX - rect.left) / this.m_canvas.width;
+			const y = (e.clientY - rect.top) / this.m_canvas.height;
+			this.m_currentStroke.points.push({ x, y });
+		}
 	}
 
 	redrawStrokes() {
@@ -308,11 +339,15 @@ class CanvasDraw extends LayerCanvasBase {
 class Application {
 	m_container: HTMLDivElement;
 	m_toolbar: HTMLDivElement;
+	m_overlay: HTMLDivElement;
+	m_menu: HTMLElement | null = null;
 	m_layers: ILayer[];
 
 	constructor() {
 		this.m_container = document.getElementById("canvas-container") as HTMLDivElement;
 		this.m_toolbar = document.getElementById('toolbar') as HTMLDivElement;
+		this.m_overlay = document.getElementById('overlay') as HTMLDivElement;
+		this.m_overlay.addEventListener("click", (e) => this.CloseOverlay());
 
 		this.m_layers = [];
 	}
@@ -423,6 +458,21 @@ class Application {
 			layer.OnResize(width, height);
 		});
 	}
+
+	ShowOverlay(node: HTMLElement, display: string = "block") {
+		this.m_menu = node;
+		this.m_menu.style.display = display;
+		this.m_overlay.style.display = "block";
+	}
+
+	CloseOverlay() {
+		if (this.m_menu) {
+			this.m_menu.style.display = "none";
+		}
+		this.m_menu = null;
+		this.m_overlay.style.display = "none";
+	}
+
 }
 
 const app = new Application();
@@ -447,36 +497,33 @@ app.Init();
 
 document.getElementById("quick")?.addEventListener("click", (e) => {
 	const menu = document.getElementById('menu');
-	const overlay = document.getElementById('overlay');
-	if (!menu || !overlay) return;
+	if (!menu) return;
+	app.ShowOverlay(menu);
+})
 
-	const isVisible = menu.style.display === 'block';
-	menu.style.display = isVisible ? 'none' : 'block';
-	overlay.style.display = isVisible ? 'none' : 'block';
-});
+function SetYawPitchRoll(yaw: number, pitch: number, roll: number, scale: number | null = null) {
+	layer3D.SetYaw(DegToRad(yaw));
+	layer3D.SetPitch(DegToRad(pitch));
+	layer3D.SetRoll(DegToRad(roll));
 
-document.getElementById("overlay")?.addEventListener("click", (e) => {
-	const menu = document.getElementById('menu');
-	const overlay = document.getElementById('overlay');
-	if (!menu || !overlay) return;
+	// won't trigger `input` event
+	(document.getElementById('yaw') as HTMLInputElement).value = yaw.toString();
+	(document.getElementById('pitch') as HTMLInputElement).value = pitch.toString();
+	(document.getElementById('roll') as HTMLInputElement).value = roll.toString();
 
-	menu.style.display = 'none';
-	overlay.style.display = 'none';
-});
+	if (scale) {
+		layer3D.SetScale(scale);
+		(document.getElementById('zSlider') as HTMLInputElement).value = scale.toString();
+	}
+}
 
 app.InitGrid([-67.5, -45, -22.5, 0, 22.5, 45, 67.5], (e: MouseEvent) => {
 	const yaw = (e.target as HTMLButtonElement).getAttribute('data-yaw');
 	const pitch = (e.target as HTMLButtonElement).getAttribute('data-pitch');
 	if (yaw == null || pitch == null) return;
 
-	layer3D.SetYaw(DegToRad(parseFloat(yaw)));
-	layer3D.SetPitch(DegToRad(parseFloat(pitch)));
-	layer3D.SetRoll(0);
-
-	// won't trigger `input` event
-	(document.getElementById('yaw') as HTMLInputElement).value = yaw.toString();
-	(document.getElementById('pitch') as HTMLInputElement).value = pitch.toString();
-	(document.getElementById('roll') as HTMLInputElement).value = "0";
-
+	SetYawPitchRoll(parseFloat(yaw), parseFloat(pitch), 0);
 	document.getElementById("overlay")?.click();
 });
+
+SetYawPitchRoll(0, 0, 0, 5);
