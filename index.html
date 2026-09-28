@@ -36,6 +36,20 @@
   .stat b{color:#9fd6ff;font-weight:600}
   .stat i{color:#4ade80;font-style:normal;font-weight:600}
 
+  /* 辅助工具按钮 */
+  .cheats{display:flex;gap:6px;align-items:center}
+  .cheat-btn{
+    font-size:11.5px;padding:5px 10px;border-radius:8px;
+    background:transparent;border:1px solid var(--line);color:var(--dim);
+    cursor:pointer;transition:.15s;font-family:inherit;
+    white-space:nowrap;line-height:1.2;
+  }
+  .cheat-btn:hover{background:rgba(74,158,255,.08);color:#8fb8dd;border-color:rgba(74,158,255,.3)}
+  .cheat-btn.active{
+    background:rgba(74,158,255,.18);border-color:rgba(74,158,255,.5);
+    color:#8fc8ff;
+  }
+
   .stage{position:relative;flex:1;overflow:hidden;min-height:0}
   canvas{display:block;width:100%;height:100%;cursor:crosshair}
 
@@ -100,6 +114,10 @@
     .hint{font-size:11.5px}
     .btn{padding:9px 14px;font-size:12.5px}
     .v-detail{display:none}
+    .cheat-btn{font-size:10.5px;padding:4px 7px}
+  }
+  @media(max-width:420px){
+    .cheat-btn .lbl{display:none}
   }
 </style>
 </head>
@@ -111,6 +129,16 @@
     <div class="badge" id="badgeType">找地平线</div>
     <div class="stat" id="statLevel">第 <b>1</b> 关</div>
     <div class="spacer"></div>
+
+    <div class="cheats">
+      <button class="cheat-btn" id="cheatEdge" title="显示所有棱的延长线（辅助找地平线）">
+        ↗<span class="lbl">&nbsp;棱延长线</span>
+      </button>
+      <button class="cheat-btn" id="cheatGrid" title="显示地平面网格（辅助找缺角）">
+        ▦<span class="lbl">&nbsp;地面网格</span>
+      </button>
+    </div>
+
     <div class="stat" id="statScore">通过 <i>0</i> / 0</div>
   </header>
 
@@ -167,6 +195,9 @@ let hoverPt     = null;
 let levelNum    = 0;
 let stats       = { played:0, passed:0 };
 
+// 辅助工具开关（跨关卡保持用户选择，默认关闭）
+const cheats = { edges:false, grid:false };
+
 const HS = 0.5;
 const TARGET_FRAC = 0.60;
 const LIGHT = norm([0.35, 0.85, 0.45]);
@@ -199,6 +230,26 @@ function project(p, c){
   const X=dot(d,c.right), Y=dot(d,c.up), Z=dot(d,c.fwd);
   if(Z<0.02) return null;
   return [c.cx + c.focal*X/Z, c.cy - c.focal*Y/Z];
+}
+
+/* 线段投影：自动裁剪掉相机后方的部分 */
+const ZNEAR = 0.05;
+function projectSegment(a, b, c){
+  const da = sub(a, c.pos), db = sub(b, c.pos);
+  const Za = dot(da, c.fwd), Zb = dot(db, c.fwd);
+  if(Za < ZNEAR && Zb < ZNEAR) return null;
+  let A = a, B = b;
+  if(Za < ZNEAR){
+    const t = (ZNEAR - Za) / (Zb - Za);
+    A = [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
+  }
+  if(Zb < ZNEAR){
+    const t = (ZNEAR - Zb) / (Za - Zb);
+    B = [b[0]+(a[0]-b[0])*t, b[1]+(a[1]-b[1])*t, b[2]+(a[2]-b[2])*t];
+  }
+  const pa = project(A, c), pb = project(B, c);
+  if(!pa || !pb) return null;
+  return [pa, pb];
 }
 
 function computeHorizon(c){
@@ -287,6 +338,107 @@ function cubicNeighbors(v){
   return out;
 }
 
+/* 收集可见面的唯一棱 */
+function collectEdges(faces){
+  const edgeSet = new Map();
+  faces.forEach(f => {
+    for(let i=0;i<4;i++){
+      const a = f.verts[i], b = f.verts[(i+1)%4];
+      const ka = vkey(a), kb = vkey(b);
+      const ek = ka < kb ? ka+'|'+kb : kb+'|'+ka;
+      if(!edgeSet.has(ek)) edgeSet.set(ek, [a,b]);
+    }
+  });
+  return edgeSet;
+}
+
+/* =========================================================
+   辅助工具绘制
+   ========================================================= */
+
+/* 显示所有可见棱的延长线，帮助感受透视方向 */
+function drawEdgeExtensions(){
+  const faces = getFaces(cam);
+  const edgeSet = collectEdges(faces);
+  const FAR = Math.max(W, H) * 1.5;
+
+  ctx.save();
+  ctx.setLineDash([5, 5]);
+  ctx.strokeStyle = 'rgba(74,158,255,.42)';
+  ctx.lineWidth = 1.2;
+  ctx.lineCap = 'butt';
+
+  edgeSet.forEach(([a, b]) => {
+    const pa = project(a, cam);
+    const pb = project(b, cam);
+    if(!pa || !pb) return;
+    const dx = pb[0] - pa[0], dy = pb[1] - pa[1];
+    const len = Math.hypot(dx, dy);
+    if(len < 1e-4) return;
+    const ux = dx/len, uy = dy/len;
+    ctx.beginPath();
+    ctx.moveTo(pa[0] - ux*FAR, pa[1] - uy*FAR);
+    ctx.lineTo(pb[0] + ux*FAR, pb[1] + uy*FAR);
+    ctx.stroke();
+  });
+
+  ctx.restore();
+}
+
+/* 显示地平面网格：方块底部落在 y = -HS 平面上 */
+function drawGroundGrid(){
+  const y = -HS;
+  const HALF = 3;    // 网格半边长（世界单位）
+  const STEP = 0.5;  // 网格间距
+  const N = Math.round(HALF / STEP);
+
+  ctx.save();
+  ctx.lineWidth = 1;
+
+  // 沿 X 方向的线（z 为常数）
+  ctx.strokeStyle = 'rgba(74,158,255,.22)';
+  for(let i = -N; i <= N; i++){
+    const z = i * STEP;
+    const seg = projectSegment([-HALF, y, z], [HALF, y, z], cam);
+    if(!seg) continue;
+    ctx.beginPath();
+    ctx.moveTo(seg[0][0], seg[0][1]);
+    ctx.lineTo(seg[1][0], seg[1][1]);
+    ctx.stroke();
+  }
+
+  // 沿 Z 方向的线（x 为常数）
+  for(let i = -N; i <= N; i++){
+    const x = i * STEP;
+    const seg = projectSegment([x, y, -HALF], [x, y, HALF], cam);
+    if(!seg) continue;
+    ctx.beginPath();
+    ctx.moveTo(seg[0][0], seg[0][1]);
+    ctx.lineTo(seg[1][0], seg[1][1]);
+    ctx.stroke();
+  }
+
+  // 高亮原点处的两条主轴，帮助定位方块位置
+  ctx.strokeStyle = 'rgba(74,158,255,.4)';
+  ctx.lineWidth = 1.4;
+  const ax1 = projectSegment([-HALF, y, 0], [HALF, y, 0], cam);
+  if(ax1){
+    ctx.beginPath();
+    ctx.moveTo(ax1[0][0], ax1[0][1]);
+    ctx.lineTo(ax1[1][0], ax1[1][1]);
+    ctx.stroke();
+  }
+  const ax2 = projectSegment([0, y, -HALF], [0, y, HALF], cam);
+  if(ax2){
+    ctx.beginPath();
+    ctx.moveTo(ax2[0][0], ax2[0][1]);
+    ctx.lineTo(ax2[1][0], ax2[1][1]);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
 /* =========================================================
    关卡生成
    ========================================================= */
@@ -341,10 +493,8 @@ function buildLevel(type){
     }
 
     if(type === 'complete'){
-      // 需要 2 或 3 个可见面
       if(faces.length < 2 || faces.length > 3) continue;
 
-      // 统计每个顶点触及多少个可见面
       const vCount = new Map();
       const vMap = new Map();
       faces.forEach(f => {
@@ -355,8 +505,6 @@ function buildLevel(type){
         });
       });
 
-      // 关键改动：只选“触及面数 = 可见面总数 - 1”的顶点
-      // 这样删除后恰好剩余 1 个完整面
       const candidates = [];
       vCount.forEach((count, k) => {
         if (count === faces.length - 1) candidates.push(k);
@@ -370,7 +518,6 @@ function buildLevel(type){
       };
     }
   }
-  // 兜底
   const L = { fovV:deg(60), el:deg(35), az:deg(45), roll:deg(8), type };
   L.dist = fitDistance(L);
   const c = makeCam(L, L.dist);
@@ -401,18 +548,29 @@ function render(){
 
   if(!level || !cam) return;
 
+  // 1. 地面网格（补全关卡辅助）—— 画在方体下方
+  if(cheats.grid && level.type === 'complete'){
+    drawGroundGrid();
+  }
+
+  // 2. 棱延长线（地平线关卡辅助）—— 画在方体下方，被方体遮住的部分不显示
+  if(cheats.edges && level.type === 'horizon'){
+    drawEdgeExtensions();
+  }
+
+  // 3. 方体
   drawCube();
+
+  // 4. 用户输入 & 答案
   drawUserInput();
   if(submitted) drawAnswer();
 }
 
-/* 关键改动：只删目标顶点、连接目标顶点的棱、包含目标顶点的面的填充 */
 function drawCube(){
   const faces = getFaces(cam);
   const isComplete = level.type === 'complete';
   const tvKey = isComplete ? vkey(level.targetVertex) : null;
 
-  // 收集所有可见顶点（去重）
   const vertMap = new Map();
   faces.forEach(f => {
     f.verts.forEach(v => {
@@ -421,18 +579,8 @@ function drawCube(){
     });
   });
 
-  // 收集所有可见棱（去重）
-  const edgeSet = new Map();
-  faces.forEach(f => {
-    for(let i=0;i<4;i++){
-      const a = f.verts[i], b = f.verts[(i+1)%4];
-      const ka = vkey(a), kb = vkey(b);
-      const ek = ka < kb ? ka+'|'+kb : kb+'|'+ka;
-      if(!edgeSet.has(ek)) edgeSet.set(ek, [a,b]);
-    }
-  });
+  const edgeSet = collectEdges(faces);
 
-  // 哪些面需要隐藏填充（包含目标顶点的面）
   const hideFill = new Set();
   if(tvKey){
     faces.forEach((f, i) => {
@@ -440,7 +588,7 @@ function drawCube(){
     });
   }
 
-  // 1. 绘制面填充（只填充不包含目标顶点的面）
+  // 面填充
   for(let fi = 0; fi < faces.length; fi++){
     if(hideFill.has(fi)) continue;
     const f = faces[fi];
@@ -459,7 +607,7 @@ function drawCube(){
     ctx.fill();
   }
 
-  // 2. 绘制棱（跳过与目标顶点相连的棱）
+  // 棱（跳过与目标顶点相连的）
   ctx.strokeStyle = '#6ba6dd';
   ctx.lineWidth = 2;
   ctx.lineJoin = 'round';
@@ -475,7 +623,7 @@ function drawCube(){
     ctx.stroke();
   });
 
-  // 3. 绘制顶点圆点（跳过目标顶点）
+  // 顶点（跳过目标顶点）
   vertMap.forEach((v, k) => {
     if(tvKey && k === tvKey) return;
     const p = project(v, cam);
@@ -654,7 +802,6 @@ function startLevel(){
   verdict=null;
   hoverPt=null;
   submitted = false;
-  submitted = false;
 
   const type = Math.random()<0.5 ? 'horizon' : 'complete';
   const built = buildLevel(type);
@@ -667,6 +814,14 @@ function startLevel(){
   document.getElementById('hint').innerHTML = type==='horizon'
     ? '点击两个点，确定<b>地平线</b>的位置'
     : '方体缺了一个角，点击你认为<b>缺失的顶点</b>应该在的位置';
+
+  // 根据关卡类型显示对应的辅助工具
+  const btnEdge = document.getElementById('cheatEdge');
+  const btnGrid = document.getElementById('cheatGrid');
+  btnEdge.style.display = type==='horizon'  ? '' : 'none';
+  btnGrid.style.display = type==='complete' ? '' : 'none';
+  btnEdge.classList.toggle('active', cheats.edges);
+  btnGrid.classList.toggle('active', cheats.grid);
 
   hideVerdict();
   updateButtons();
@@ -791,6 +946,18 @@ document.getElementById('btnClear').addEventListener('click', ()=>{
 document.getElementById('btnSubmit').addEventListener('click', submit);
 document.getElementById('btnNext').addEventListener('click', startLevel);
 
+/* 辅助工具切换 */
+document.getElementById('cheatEdge').addEventListener('click', ()=>{
+  cheats.edges = !cheats.edges;
+  document.getElementById('cheatEdge').classList.toggle('active', cheats.edges);
+  requestRender();
+});
+document.getElementById('cheatGrid').addEventListener('click', ()=>{
+  cheats.grid = !cheats.grid;
+  document.getElementById('cheatGrid').classList.toggle('active', cheats.grid);
+  requestRender();
+});
+
 window.addEventListener('resize', ()=>{
   clearTimeout(window.__rz);
   window.__rz = setTimeout(resize, 120);
@@ -804,6 +971,9 @@ window.addEventListener('keydown', e=>{
   if(e.key === 'Escape' || e.key === 'r' || e.key === 'R'){
     if(!submitted){ userPoints=[]; hoverPt=null; updateButtons(); requestRender(); }
   }
+  // 快捷切换辅助工具
+  if(e.key === 'e' || e.key === 'E'){ document.getElementById('cheatEdge').click(); }
+  if(e.key === 'g' || e.key === 'G'){ document.getElementById('cheatGrid').click(); }
 });
 
 /* =========================================================
