@@ -1,0 +1,816 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>透视训练 · Perspective Trainer</title>
+<style>
+  :root{
+    --bg:#070a0f; --panel:#0e141d; --line:#1c2735;
+    --text:#c9d8e8; --dim:#66798f; --accent:#4a9eff;
+    --ok:#4ade80; --bad:#f87171; --user:#ffb020;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--text); overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    user-select:none; -webkit-tap-highlight-color:transparent;
+  }
+  .app{display:flex;flex-direction:column;height:100%;max-width:1400px;margin:0 auto}
+
+  .topbar{
+    display:flex;align-items:center;gap:14px;
+    padding:0 18px;height:54px;flex:0 0 54px;
+    border-bottom:1px solid var(--line);background:var(--panel);
+  }
+  .brand{font-size:15px;font-weight:700;letter-spacing:.5px;color:#e8f1fb}
+  .brand span{color:var(--accent)}
+  .badge{
+    font-size:12px;padding:3px 10px;border-radius:99px;
+    background:rgba(74,158,255,.12);color:#7fbcf5;border:1px solid rgba(74,158,255,.25);
+  }
+  .badge.t2{background:rgba(255,176,32,.12);color:#ffc45e;border-color:rgba(255,176,32,.25)}
+  .spacer{flex:1}
+  .stat{font-size:12.5px;color:var(--dim);font-variant-numeric:tabular-nums}
+  .stat b{color:#9fd6ff;font-weight:600}
+  .stat i{color:#4ade80;font-style:normal;font-weight:600}
+
+  .stage{position:relative;flex:1;overflow:hidden;min-height:0}
+  canvas{display:block;width:100%;height:100%;cursor:crosshair}
+
+  .verdict{
+    position:absolute;left:50%;bottom:18px;
+    transform:translate(-50%,180%);
+    display:flex;align-items:center;gap:14px;
+    padding:12px 16px 12px 18px;border-radius:14px;
+    background:rgba(16,23,33,.92);
+    border:1px solid var(--line);
+    box-shadow:0 12px 40px rgba(0,0,0,.55);
+    backdrop-filter:blur(10px);
+    transition:transform .38s cubic-bezier(.2,.9,.3,1.15);
+    max-width:calc(100% - 32px);
+  }
+  .verdict.show{transform:translate(-50%,0)}
+  .v-icon{
+    width:34px;height:34px;flex:0 0 34px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:18px;font-weight:700;
+  }
+  .verdict.ok .v-icon{background:rgba(74,222,128,.15);color:var(--ok);border:1px solid rgba(74,222,128,.35)}
+  .verdict.no .v-icon{background:rgba(248,113,113,.15);color:var(--bad);border:1px solid rgba(248,113,113,.35)}
+  .v-body{min-width:0}
+  .v-title{font-size:14px;font-weight:700;margin-bottom:2px}
+  .verdict.ok .v-title{color:var(--ok)}
+  .verdict.no .v-title{color:var(--bad)}
+  .v-detail{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .v-btn{
+    margin-left:6px;padding:9px 16px;border-radius:10px;border:1px solid var(--accent);
+    background:rgba(74,158,255,.14);color:#8fc8ff;font-size:13px;font-weight:600;
+    cursor:pointer;transition:.15s;font-family:inherit;white-space:nowrap;
+  }
+  .v-btn:hover{background:rgba(74,158,255,.28)}
+
+  .controls{
+    display:flex;align-items:center;gap:12px;
+    padding:0 18px;height:64px;flex:0 0 64px;
+    border-top:1px solid var(--line);background:var(--panel);
+  }
+  .hint{font-size:12.5px;color:var(--dim);flex:1;min-width:0;
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hint b{color:#8fb8dd;font-weight:600}
+  .btn{
+    padding:10px 20px;border-radius:10px;font-size:13.5px;font-weight:600;
+    border:1px solid var(--line);background:#141c28;color:#9db1c7;
+    cursor:pointer;transition:.15s;font-family:inherit;
+  }
+  .btn:hover:not(:disabled){background:#1a2533;color:#c8d8e8}
+  .btn:disabled{opacity:.35;cursor:not-allowed}
+  .btn.primary{
+    background:linear-gradient(180deg,#2f7fe0,#2668bd);color:#fff;
+    border-color:#3a8ff0;box-shadow:0 4px 14px rgba(47,127,224,.3);
+  }
+  .btn.primary:hover:not(:disabled){background:linear-gradient(180deg,#3a8ff0,#2c74cd)}
+  .btn.primary:disabled{box-shadow:none}
+
+  @media(max-width:560px){
+    .brand{display:none}
+    .topbar{padding:0 12px;gap:8px}
+    .controls{padding:0 12px;gap:8px}
+    .hint{font-size:11.5px}
+    .btn{padding:9px 14px;font-size:12.5px}
+    .v-detail{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">透视<span>训练</span></div>
+    <div class="badge" id="badgeType">找地平线</div>
+    <div class="stat" id="statLevel">第 <b>1</b> 关</div>
+    <div class="spacer"></div>
+    <div class="stat" id="statScore">通过 <i>0</i> / 0</div>
+  </header>
+
+  <main class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="verdict" id="verdict">
+      <div class="v-icon" id="vIcon">✓</div>
+      <div class="v-body">
+        <div class="v-title" id="vTitle">通过！</div>
+        <div class="v-detail" id="vDetail"></div>
+      </div>
+      <button class="v-btn" id="btnNext">下一关 →</button>
+    </div>
+  </main>
+
+  <footer class="controls">
+    <div class="hint" id="hint"></div>
+    <button class="btn" id="btnClear">清空</button>
+    <button class="btn primary" id="btnSubmit" disabled>提交</button>
+  </footer>
+
+</div>
+
+<script>
+"use strict";
+/* =========================================================
+   基础数学
+   ========================================================= */
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+const mul=(a,s)=>[a[0]*s,a[1]*s,a[2]*s];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const vlen=a=>Math.hypot(a[0],a[1],a[2]);
+const norm=a=>{const l=vlen(a)||1;return [a[0]/l,a[1]/l,a[2]/l];};
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const rand=(a,b)=>a+Math.random()*(b-a);
+const deg=d=>d*Math.PI/180;
+
+/* =========================================================
+   全局状态
+   ========================================================= */
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+let W = 800, H = 600, DPR = 1;
+
+let level       = null;
+let cam         = null;
+let userPoints  = [];
+let submitted   = false;
+let verdict     = null;
+let hoverPt     = null;
+let levelNum    = 0;
+let stats       = { played:0, passed:0 };
+
+const HS = 0.5;
+const TARGET_FRAC = 0.60;
+const LIGHT = norm([0.35, 0.85, 0.45]);
+
+const TOL = {
+  horizon:  { angle: 5.0,  distRatio: 0.035 },
+  complete: { distRatio: 0.085 }
+};
+
+/* =========================================================
+   相机 / 投影
+   ========================================================= */
+function makeCam(L, dist){
+  const ce=Math.cos(L.el), se=Math.sin(L.el);
+  const ca=Math.cos(L.az), sa=Math.sin(L.az);
+  const dir=[ce*sa, se, ce*ca];
+  const pos=mul(dir, dist);
+  const fwd=mul(dir,-1);
+  let right=norm(cross(fwd,[0,1,0]));
+  let up=cross(right,fwd);
+  const cr=Math.cos(L.roll), sr=Math.sin(L.roll);
+  const right2=add(mul(right,cr), mul(up,sr));
+  const up2   =add(mul(right,-sr), mul(up,cr));
+  const focal=(H/2)/Math.tan(L.fovV/2);
+  return { pos, fwd, right:right2, up:up2, focal, cx:W/2, cy:H/2 };
+}
+
+function project(p, c){
+  const d=sub(p,c.pos);
+  const X=dot(d,c.right), Y=dot(d,c.up), Z=dot(d,c.fwd);
+  if(Z<0.02) return null;
+  return [c.cx + c.focal*X/Z, c.cy - c.focal*Y/Z];
+}
+
+function computeHorizon(c){
+  const n=[c.right[1], c.up[1], c.fwd[1]];
+  return {
+    A: n[0],
+    B: -n[1],
+    C: -n[0]*c.cx + n[1]*c.cy + n[2]*c.focal
+  };
+}
+
+function horizonSegment(c){
+  const {A,B,C}=c.horizon;
+  const L=Math.hypot(A,B);
+  if(L<1e-9) return null;
+  const px=-A*C/(L*L), py=-B*C/(L*L);
+  const dx=B/L, dy=-A/L;
+  let t0=-1e9, t1=1e9;
+  if(Math.abs(dx)>1e-9){
+    let a=(0-px)/dx, b=(W-px)/dx;
+    if(a>b){const t=a;a=b;b=t;}
+    t0=Math.max(t0,a); t1=Math.min(t1,b);
+  } else if(px<0||px>W) return null;
+  if(Math.abs(dy)>1e-9){
+    let a=(0-py)/dy, b=(H-py)/dy;
+    if(a>b){const t=a;a=b;b=t;}
+    t0=Math.max(t0,a); t1=Math.min(t1,b);
+  } else if(py<0||py>H) return null;
+  if(t0>=t1) return null;
+  return [[px+dx*t0, py+dy*t0],[px+dx*t1, py+dy*t1]];
+}
+
+/* =========================================================
+   立方体几何
+   ========================================================= */
+function vert(i,j,k){ return [i?HS:-HS, j?HS:-HS, k?HS:-HS]; }
+const vkey = v => v[0].toFixed(4)+','+v[1].toFixed(4)+','+v[2].toFixed(4);
+
+function getFaces(c){
+  const p=c.pos;
+  const faces=[];
+  if(p[0] > HS){
+    faces.push({ axis:0, sign:1, nrm:[1,0,0],
+      verts:[vert(1,0,0),vert(1,0,1),vert(1,1,1),vert(1,1,0)] });
+  } else if(p[0] < -HS){
+    faces.push({ axis:0, sign:-1, nrm:[-1,0,0],
+      verts:[vert(0,0,0),vert(0,0,1),vert(0,1,1),vert(0,1,0)] });
+  }
+  if(p[1] > HS){
+    faces.push({ axis:1, sign:1, nrm:[0,1,0],
+      verts:[vert(0,1,0),vert(1,1,0),vert(1,1,1),vert(0,1,1)] });
+  } else if(p[1] < -HS){
+    faces.push({ axis:1, sign:-1, nrm:[0,-1,0],
+      verts:[vert(0,0,0),vert(1,0,0),vert(1,0,1),vert(0,0,1)] });
+  }
+  if(p[2] > HS){
+    faces.push({ axis:2, sign:1, nrm:[0,0,1],
+      verts:[vert(0,0,1),vert(1,0,1),vert(1,1,1),vert(0,1,1)] });
+  } else if(p[2] < -HS){
+    faces.push({ axis:2, sign:-1, nrm:[0,0,-1],
+      verts:[vert(0,0,0),vert(1,0,0),vert(1,1,0),vert(0,1,0)] });
+  }
+  return faces;
+}
+
+function visibleVertices(c){
+  const map = new Map();
+  const faces = getFaces(c);
+  faces.forEach((f, fi) => {
+    f.verts.forEach(v => {
+      const k = vkey(v);
+      if(!map.has(k)) map.set(k, { v, faces:[] });
+      map.get(k).faces.push(fi);
+    });
+  });
+  return { vertices: Array.from(map.values()), faces };
+}
+
+function cubicNeighbors(v){
+  const out = [];
+  for (let i = 0; i < 3; i++){
+    const nv = [...v];
+    nv[i] = -nv[i];
+    out.push(nv);
+  }
+  return out;
+}
+
+/* =========================================================
+   关卡生成
+   ========================================================= */
+function randomParams(){
+  const L = {};
+  L.fovV = deg(rand(55, 70));
+  L.el  = deg(rand(10, 46)) * (Math.random()<0.5?1:-1);
+  L.az  = deg(rand(30, 58)) * (Math.random()<0.5?1:-1);
+  L.roll= deg(rand(3, 14))  * (Math.random()<0.5?1:-1);
+  return L;
+}
+
+function cubeBBox(c){
+  let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
+  for(let i=0;i<8;i++){
+    const v=[(i&1)?HS:-HS,(i&2)?HS:-HS,(i&4)?HS:-HS];
+    const p=project(v,c);
+    if(!p) return null;
+    if(p[0]<minX)minX=p[0]; if(p[0]>maxX)maxX=p[0];
+    if(p[1]<minY)minY=p[1]; if(p[1]>maxY)maxY=p[1];
+  }
+  return {minX,minY,maxX,maxY,w:maxX-minX,h:maxY-minY};
+}
+
+function fitDistance(L){
+  let lo=0.6, hi=40;
+  for(let i=0;i<36;i++){
+    const mid=(lo+hi)/2;
+    const c=makeCam(L, mid);
+    const bb=cubeBBox(c);
+    const frac = bb ? Math.max(bb.w/W, bb.h/H) : 1e9;
+    if(frac>TARGET_FRAC) lo=mid; else hi=mid;
+  }
+  return (lo+hi)/2;
+}
+
+function buildLevel(type){
+  for(let attempt=0; attempt<400; attempt++){
+    const cand = randomParams();
+    const dist = fitDistance(cand);
+    const test = makeCam(cand, dist);
+    test.horizon = computeHorizon(test);
+
+    const faces = getFaces(test);
+
+    if(type === 'horizon'){
+      const seg = horizonSegment(test);
+      if(!seg) continue;
+      const segLen = Math.hypot(seg[1][0]-seg[0][0], seg[1][1]-seg[0][1]);
+      if(segLen < Math.min(W,H)*0.55) continue;
+      return { L: { ...cand, dist, type }, cam: test };
+    }
+
+    if(type === 'complete'){
+      // 需要 2 或 3 个可见面
+      if(faces.length < 2 || faces.length > 3) continue;
+
+      // 统计每个顶点触及多少个可见面
+      const vCount = new Map();
+      const vMap = new Map();
+      faces.forEach(f => {
+        f.verts.forEach(v => {
+          const k = vkey(v);
+          vCount.set(k, (vCount.get(k) || 0) + 1);
+          vMap.set(k, v);
+        });
+      });
+
+      // 关键改动：只选“触及面数 = 可见面总数 - 1”的顶点
+      // 这样删除后恰好剩余 1 个完整面
+      const candidates = [];
+      vCount.forEach((count, k) => {
+        if (count === faces.length - 1) candidates.push(k);
+      });
+      if(candidates.length === 0) continue;
+
+      const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+      return {
+        L: { ...cand, dist, type, targetVertex: vMap.get(chosen) },
+        cam: test
+      };
+    }
+  }
+  // 兜底
+  const L = { fovV:deg(60), el:deg(35), az:deg(45), roll:deg(8), type };
+  L.dist = fitDistance(L);
+  const c = makeCam(L, L.dist);
+  c.horizon = computeHorizon(c);
+  if(type === 'complete'){
+    const { vertices } = visibleVertices(c);
+    L.targetVertex = vertices[0].v;
+  }
+  return { L, cam:c };
+}
+
+/* =========================================================
+   渲染
+   ========================================================= */
+let renderQueued = false;
+function requestRender(){
+  if(renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(()=>{ renderQueued=false; render(); });
+}
+
+function render(){
+  const g = ctx.createRadialGradient(W*0.5, H*0.38, 0, W*0.5, H*0.38, Math.max(W,H)*0.85);
+  g.addColorStop(0,'#121a26');
+  g.addColorStop(1,'#070a0f');
+  ctx.fillStyle=g;
+  ctx.fillRect(0,0,W,H);
+
+  if(!level || !cam) return;
+
+  drawCube();
+  drawUserInput();
+  if(submitted) drawAnswer();
+}
+
+/* 关键改动：只删目标顶点、连接目标顶点的棱、包含目标顶点的面的填充 */
+function drawCube(){
+  const faces = getFaces(cam);
+  const isComplete = level.type === 'complete';
+  const tvKey = isComplete ? vkey(level.targetVertex) : null;
+
+  // 收集所有可见顶点（去重）
+  const vertMap = new Map();
+  faces.forEach(f => {
+    f.verts.forEach(v => {
+      const k = vkey(v);
+      if(!vertMap.has(k)) vertMap.set(k, v);
+    });
+  });
+
+  // 收集所有可见棱（去重）
+  const edgeSet = new Map();
+  faces.forEach(f => {
+    for(let i=0;i<4;i++){
+      const a = f.verts[i], b = f.verts[(i+1)%4];
+      const ka = vkey(a), kb = vkey(b);
+      const ek = ka < kb ? ka+'|'+kb : kb+'|'+ka;
+      if(!edgeSet.has(ek)) edgeSet.set(ek, [a,b]);
+    }
+  });
+
+  // 哪些面需要隐藏填充（包含目标顶点的面）
+  const hideFill = new Set();
+  if(tvKey){
+    faces.forEach((f, i) => {
+      if(f.verts.some(v => vkey(v) === tvKey)) hideFill.add(i);
+    });
+  }
+
+  // 1. 绘制面填充（只填充不包含目标顶点的面）
+  for(let fi = 0; fi < faces.length; fi++){
+    if(hideFill.has(fi)) continue;
+    const f = faces[fi];
+    const pts = f.verts.map(v => project(v, cam));
+    if(pts.some(p => !p)) continue;
+    const lam = Math.max(0, dot(f.nrm, LIGHT));
+    const t = 0.22 + 0.78*lam;
+    const r = Math.round(18 + 62*t);
+    const gg= Math.round(32 + 96*t);
+    const b = Math.round(52 + 132*t);
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for(let k=1;k<4;k++) ctx.lineTo(pts[k][0], pts[k][1]);
+    ctx.closePath();
+    ctx.fillStyle = `rgb(${r},${gg},${b})`;
+    ctx.fill();
+  }
+
+  // 2. 绘制棱（跳过与目标顶点相连的棱）
+  ctx.strokeStyle = '#6ba6dd';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  edgeSet.forEach(([a,b]) => {
+    const ka = vkey(a), kb = vkey(b);
+    if(tvKey && (ka === tvKey || kb === tvKey)) return;
+    const pa = project(a, cam), pb = project(b, cam);
+    if(!pa || !pb) return;
+    ctx.beginPath();
+    ctx.moveTo(pa[0], pa[1]);
+    ctx.lineTo(pb[0], pb[1]);
+    ctx.stroke();
+  });
+
+  // 3. 绘制顶点圆点（跳过目标顶点）
+  vertMap.forEach((v, k) => {
+    if(tvKey && k === tvKey) return;
+    const p = project(v, cam);
+    if(!p) return;
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], 2.6, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(150,200,240,.8)';
+    ctx.fill();
+  });
+}
+
+function drawUserInput(){
+  ctx.save();
+
+  for(let i=0;i+1<userPoints.length;i+=2){
+    const a=userPoints[i], b=userPoints[i+1];
+    ctx.beginPath();
+    ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]);
+    ctx.strokeStyle='rgba(255,176,32,.95)';
+    ctx.lineWidth=2.4;
+    ctx.lineCap='round';
+    ctx.stroke();
+  }
+
+  if(!submitted && hoverPt && userPoints.length===1 && level.type==='horizon'){
+    const a=userPoints[0];
+    ctx.beginPath();
+    ctx.moveTo(a[0],a[1]); ctx.lineTo(hoverPt[0],hoverPt[1]);
+    ctx.strokeStyle='rgba(255,176,32,.4)';
+    ctx.lineWidth=1.6;
+    ctx.setLineDash([7,6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  userPoints.forEach(p=>{
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], 5.8, 0, Math.PI*2);
+    ctx.fillStyle='#ffb020';
+    ctx.fill();
+    ctx.strokeStyle='#fff';
+    ctx.lineWidth=2;
+    ctx.stroke();
+  });
+
+  ctx.restore();
+}
+
+function drawAnswer(){
+  const col = verdict && verdict.pass ? '#4ade80' : '#f87171';
+
+  if(level.type === 'horizon'){
+    const seg = horizonSegment(cam);
+    if(seg){
+      ctx.save();
+      ctx.setLineDash([12,8]);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = 0.95;
+      ctx.beginPath();
+      ctx.moveTo(seg[0][0], seg[0][1]);
+      ctx.lineTo(seg[1][0], seg[1][1]);
+      ctx.stroke();
+      ctx.restore();
+      const mx=(seg[0][0]+seg[1][0])/2, my=(seg[0][1]+seg[1][1])/2;
+      drawTag('地平线', mx, my, col);
+    }
+  } else {
+    const tProj = project(level.targetVertex, cam);
+    if(!tProj) return;
+    const nbs = cubicNeighbors(level.targetVertex);
+
+    ctx.save();
+    ctx.setLineDash([9,6]);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    for(const nv of nbs){
+      const np = project(nv, cam);
+      if(!np) continue;
+      ctx.beginPath();
+      ctx.moveTo(tProj[0], tProj[1]);
+      ctx.lineTo(np[0], np[1]);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.beginPath();
+    ctx.arc(tProj[0], tProj[1], 6.5, 0, Math.PI*2);
+    ctx.fillStyle = col;
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    drawTag('缺角', tProj[0], tProj[1], col, true);
+  }
+}
+
+function drawTag(text,x,y,color,below){
+  ctx.save();
+  ctx.font = '600 12px -apple-system,"PingFang SC",sans-serif';
+  const w = ctx.measureText(text).width + 16;
+  const h = 22;
+  const tx = x - w/2;
+  const ty = below ? y + 14 : y - h - 10;
+  ctx.fillStyle = 'rgba(10,15,22,.9)';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  roundRect(tx, ty, w, h, 7);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x, ty + h/2 + 0.5);
+  ctx.restore();
+}
+
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+/* =========================================================
+   评分
+   ========================================================= */
+function gradeHorizon(){
+  if(userPoints.length<2) return { pass:false, angle:99, dist:1e9, msg:'未绘制' };
+  const [p1,p2]=userPoints;
+  const {A,B,C}=cam.horizon;
+  const L=Math.hypot(A,B);
+  const udx=p2[0]-p1[0], udy=p2[1]-p1[1];
+  const ulen=Math.hypot(udx,udy);
+  if(ulen<2) return { pass:false, angle:99, dist:1e9, msg:'两点太近' };
+  const hdx=B/L, hdy=-A/L;
+  const cosA=clamp(Math.abs((udx/ulen)*hdx + (udy/ulen)*hdy),0,1);
+  const angle=Math.acos(cosA)*180/Math.PI;
+  const seg=horizonSegment(cam);
+  if(!seg) return { pass:false, angle, dist:1e9, msg:'地平线不可见' };
+  const nx=-udy/ulen, ny=udx/ulen;
+  let sum=0;
+  const N=9;
+  for(let i=0;i<=N;i++){
+    const t=i/N;
+    const px=seg[0][0]+(seg[1][0]-seg[0][0])*t;
+    const py=seg[0][1]+(seg[1][1]-seg[0][1])*t;
+    sum+=Math.abs((px-p1[0])*nx + (py-p1[1])*ny);
+  }
+  const dist=sum/(N+1);
+  const pass = angle <= TOL.horizon.angle && dist <= H*TOL.horizon.distRatio;
+  return { pass, angle, dist };
+}
+
+function gradeComplete(){
+  if(userPoints.length < 1) return { pass:false, angle:0, dist:1e9, msg:'请点击一个位置' };
+  const [px, py] = userPoints[0];
+  const tp = project(level.targetVertex, cam);
+  if(!tp) return { pass:false, angle:0, dist:1e9, msg:'投影失败' };
+  const dist = Math.hypot(px - tp[0], py - tp[1]);
+  const pass = dist <= H * TOL.complete.distRatio;
+  return { pass, angle: 0, dist };
+}
+
+/* =========================================================
+   流程控制
+   ========================================================= */
+function startLevel(){
+  levelNum++;
+  userPoints=[];
+  submitted=false;
+  verdict=null;
+  hoverPt=null;
+  submitted = false;
+  submitted = false;
+
+  const type = Math.random()<0.5 ? 'horizon' : 'complete';
+  const built = buildLevel(type);
+  level = built.L;
+  cam = built.cam;
+
+  document.getElementById('badgeType').textContent = type==='horizon'?'找地平线':'补全缺角';
+  document.getElementById('badgeType').className = 'badge' + (type==='horizon'?'':' t2');
+  document.getElementById('statLevel').innerHTML = '第 <b>'+levelNum+'</b> 关';
+  document.getElementById('hint').innerHTML = type==='horizon'
+    ? '点击两个点，确定<b>地平线</b>的位置'
+    : '方体缺了一个角，点击你认为<b>缺失的顶点</b>应该在的位置';
+
+  hideVerdict();
+  updateButtons();
+  updateStats();
+  requestRender();
+}
+
+function submit(){
+  if(submitted || !level) return;
+  submitted = true;
+  verdict = level.type==='horizon' ? gradeHorizon() : gradeComplete();
+
+  stats.played++;
+  if(verdict.pass) stats.passed++;
+
+  updateStats();
+  updateButtons();
+  showVerdict();
+  requestRender();
+}
+
+function updateButtons(){
+  const need = level && level.type==='complete' ? 1 : 2;
+  document.getElementById('btnSubmit').disabled = submitted || userPoints.length < need;
+  document.getElementById('btnClear').disabled  = submitted || userPoints.length === 0;
+}
+
+function updateStats(){
+  document.getElementById('statScore').innerHTML =
+    '通过 <i>'+stats.passed+'</i> / '+stats.played;
+}
+
+function showVerdict(){
+  const v=document.getElementById('verdict');
+  v.className='verdict show ' + (verdict.pass?'ok':'no');
+  document.getElementById('vIcon').textContent = verdict.pass?'✓':'✕';
+  document.getElementById('vTitle').textContent =
+    verdict.pass ? '通过！' : (verdict.msg || '再想想～');
+  const detail = document.getElementById('vDetail');
+  detail.textContent = level.type === 'horizon'
+    ? '角度偏差 '+verdict.angle.toFixed(1)+'°  ·  位置偏差 '+Math.round(verdict.dist)+'px'
+    : '位置偏差 '+Math.round(verdict.dist)+'px';
+  document.getElementById('btnNext').textContent =
+    verdict.pass ? '下一关 →' : '看下一关 →';
+}
+
+function hideVerdict(){
+  document.getElementById('verdict').className='verdict';
+}
+
+/* =========================================================
+   尺寸 / 坐标
+   ========================================================= */
+function resize(){
+  const r = document.getElementById('stage').getBoundingClientRect();
+  DPR = Math.min(window.devicePixelRatio||1, 2.5);
+  W = Math.max(200, Math.floor(r.width));
+  H = Math.max(200, Math.floor(r.height));
+  cv.width = Math.floor(W*DPR);
+  cv.height= Math.floor(H*DPR);
+  cv.style.width = W+'px';
+  cv.style.height= H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+
+  if(level){
+    level.dist = fitDistance(level);
+    cam = makeCam(level, level.dist);
+    cam.horizon = computeHorizon(cam);
+    userPoints=[];
+    hoverPt=null;
+    updateButtons();
+    hideVerdict();
+  }
+  requestRender();
+}
+
+function evtPos(e){
+  const r = cv.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  return [ t.clientX - r.left, t.clientY - r.top ];
+}
+
+/* =========================================================
+   事件
+   ========================================================= */
+cv.addEventListener('pointerdown', e=>{
+  e.preventDefault();
+  if(!level || submitted) return;
+  const pt = evtPos(e);
+  if(level.type === 'complete'){
+    userPoints = [pt];
+  } else {
+    if(userPoints.length >= 2) userPoints = [];
+    userPoints.push(pt);
+  }
+  hoverPt = null;
+  updateButtons();
+  requestRender();
+});
+
+cv.addEventListener('pointermove', e=>{
+  if(!level || submitted) return;
+  if(level.type !== 'horizon') return;
+  if(userPoints.length !== 1) return;
+  hoverPt = evtPos(e);
+  requestRender();
+});
+
+cv.addEventListener('pointerleave', ()=>{
+  hoverPt = null;
+  requestRender();
+});
+
+document.getElementById('btnClear').addEventListener('click', ()=>{
+  if(submitted) return;
+  userPoints=[];
+  hoverPt=null;
+  updateButtons();
+  requestRender();
+});
+
+document.getElementById('btnSubmit').addEventListener('click', submit);
+document.getElementById('btnNext').addEventListener('click', startLevel);
+
+window.addEventListener('resize', ()=>{
+  clearTimeout(window.__rz);
+  window.__rz = setTimeout(resize, 120);
+});
+
+window.addEventListener('keydown', e=>{
+  if(e.key === 'Enter'){
+    if(submitted) startLevel();
+    else if(!document.getElementById('btnSubmit').disabled) submit();
+  }
+  if(e.key === 'Escape' || e.key === 'r' || e.key === 'R'){
+    if(!submitted){ userPoints=[]; hoverPt=null; updateButtons(); requestRender(); }
+  }
+});
+
+/* =========================================================
+   启动
+   ========================================================= */
+resize();
+startLevel();
+</script>
+</body>
+</html>
